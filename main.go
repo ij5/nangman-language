@@ -2,7 +2,6 @@ package main
 
 import (
 	"bufio"
-	"encoding/json"
 	"fmt"
 	"os"
 	"strconv"
@@ -30,11 +29,20 @@ var parser = participle.MustBuild(
 	// participle.UseLookahead(2),
 )
 
-type Operator struct {
-	OpMul string `"*"`
-	OpDiv string `"/"`
-	OpAdd string `"+"`
-	OpSub string `"-"`
+type Operator int
+
+const (
+	OpMul Operator = iota
+	OpDiv
+	OpAdd
+	OpSub
+)
+
+var operatorMap = map[string]Operator{"+": OpAdd, "-": OpSub, "*": OpMul, "/": OpDiv}
+
+func (o *Operator) Capture(s []string) error {
+	*o = operatorMap[s[0]]
+	return nil
 }
 
 type Value struct {
@@ -49,7 +57,7 @@ type Factor struct {
 }
 
 type OpFactor struct {
-	Operator *Operator `@@`
+	Operator *Operator `@("곱하기" | "나누기")`
 	Factor   *Factor   `@@`
 }
 
@@ -59,7 +67,7 @@ type Term struct {
 }
 
 type OpTerm struct {
-	Operator *Operator `@@`
+	Operator *Operator `@("더하기" | "빼기")`
 	Term     *Term     `@@`
 }
 
@@ -71,11 +79,17 @@ type Expression struct {
 type Statement struct {
 	Expr      *Expression `  @@`
 	PrintFunc *Print      `| @@`
+	ExitFunc  *Exit       `| @@`
+	EOL       string      `| @EOF`
 }
 
 type Print struct {
 	Name      string      `"나는" "그녀에게" "말했다" "."`
 	Parameter *Expression `@@`
+}
+
+type Exit struct {
+	Stmt string `"그녀는" "나를" ("차버렸다" | "찼다")`
 }
 
 func (s *Statement) Eval() {
@@ -84,8 +98,10 @@ func (s *Statement) Eval() {
 		s.Expr.Eval()
 	case s.PrintFunc != nil:
 		s.PrintFunc.Eval()
+	case s.ExitFunc != nil:
+		s.ExitFunc.Eval()
 	default:
-		panic("error code 221")
+		return
 	}
 }
 
@@ -127,7 +143,7 @@ func (v *Value) Eval() interface{} {
 		}
 		return f
 	case v.String != nil:
-		return *v.String
+		return (*v.String)[1 : len(*v.String)-1]
 	default:
 		return v.Subexpression.Eval()
 	}
@@ -139,23 +155,40 @@ func (o Operator) Eval(l, r interface{}) interface{} {
 		fmt.Println("문자열은 연산할 수 없습니다.")
 		return nil
 	}
-	switch {
-	case o.OpMul != "":
-		return l.(float64) * r.(float64)
-	case o.OpDiv != "":
-		return l.(float64) / r.(float64)
-	case o.OpAdd != "":
-		return l.(float64) + r.(float64)
-	case o.OpSub != "":
-		return l.(float64) - r.(float64)
-	default:
-		fmt.Println("지원하지 않는 연산자입니다.")
+	switch r.(type) {
+	case string:
+		fmt.Println("문자열은 연산할 수 없습니다.")
 		return nil
 	}
+	switch o {
+	case OpMul:
+		return l.(float64) * r.(float64)
+	case OpDiv:
+		return l.(float64) / r.(float64)
+	case OpAdd:
+		return l.(float64) + r.(float64)
+	case OpSub:
+		return l.(float64) - r.(float64)
+	}
+	panic("unsupported operator")
 }
 
 func (p *Print) Eval() {
-	fmt.Println(p.Parameter.Eval())
+	result := p.Parameter.Eval()
+	switch result.(type) {
+	case float64:
+		fmt.Print("그녀가 말했다. \"")
+		fmt.Print(result)
+		fmt.Println("\"")
+	case string:
+		fmt.Print("그녀가 따라했다. \"")
+		fmt.Print(result)
+		fmt.Println("\"")
+	}
+}
+
+func (e *Exit) Eval() {
+	panic("프로그램이 종료되었습니다.")
 }
 
 func main() {
@@ -172,7 +205,7 @@ func main() {
 		err = parser.ParseString("", input, program)
 		if err != nil {
 			fmt.Println(err)
-			json.NewEncoder(os.Stdout).Encode(program)
+			// json.NewEncoder(os.Stdout).Encode(program)
 			continue
 		}
 		program.Eval()
